@@ -2,7 +2,7 @@ Feature: 多維度分析和對比
 
 Background:
   Given 授課教師已登入系統
-  And 系統中有班級成績數據
+  And 系統中有班級成績資料
 
 Scenario: 按不同維度分析
   When 授課教師進入"統計分析"
