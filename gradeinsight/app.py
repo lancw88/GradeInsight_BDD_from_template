@@ -44,6 +44,13 @@ def create_app(config=None):
     with app.app_context():
         # 創建數據庫表
         db.create_all()
+        
+        # 自動遷移缺失的欄位（針對已有的表）
+        try:
+            from gradeinsight.models import migrate_schema
+            migrate_schema()
+        except Exception as e:
+            app.logger.warning(f"Schema migration warning: {e}")
     
     return app
 

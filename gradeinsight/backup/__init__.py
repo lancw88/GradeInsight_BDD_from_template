@@ -18,6 +18,7 @@ class BackupService:
     
     # 加密密鑰（在生產環境應從環境變量讀取）
     ENCRYPTION_KEY = Fernet.generate_key()
+    notification_history = []
     
     # 備份配置
     BACKUP_RETENTION_DAYS = 30
@@ -48,16 +49,16 @@ class BackupService:
         
         try:
             # 生成備份文件名
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_filename = f"backup_{timestamp}.db"
+            timestamp = datetime.now().strftime('%Y-%m-%d')
+            backup_filename = f"grades_backup_{timestamp}.bak.enc"
             backup_path = os.path.join(BackupService.BACKUP_DIR, backup_filename)
             
-            # 複製數據庫文件
+            # 複製數據庫文件並加密備份
             if os.path.exists(BackupService.DB_PATH):
-                shutil.copy2(BackupService.DB_PATH, backup_path)
-                
-                # 加密備份文件
-                BackupService._encrypt_file(backup_path)
+                tmp_path = backup_path + '.tmp'
+                shutil.copy2(BackupService.DB_PATH, tmp_path)
+                BackupService._encrypt_file(tmp_path)
+                os.rename(tmp_path, backup_path)
                 
                 # 獲取文件大小
                 file_size = os.path.getsize(backup_path)
@@ -67,12 +68,14 @@ class BackupService:
                 backup_log.file_size = file_size
                 backup_log.status = 'success'
                 backup_log.completed_at = datetime.utcnow()
+                BackupService.send_notification('success', f'備份成功: {backup_filename}')
             else:
                 raise Exception(f"數據庫文件不存在: {BackupService.DB_PATH}")
             
         except Exception as e:
             backup_log.status = 'failed'
             backup_log.error_message = str(e)
+            BackupService.send_notification('failure', f'備份失敗: {str(e)}')
             print(f"❌ 備份失敗: {str(e)}")
         
         db.session.commit()
@@ -130,7 +133,7 @@ class BackupService:
         cutoff_date = datetime.now() - timedelta(days=BackupService.BACKUP_RETENTION_DAYS)
         
         for backup_file in os.listdir(BackupService.BACKUP_DIR):
-            if backup_file.startswith('backup_'):
+            if backup_file.startswith('grades_backup_'):
                 backup_path = os.path.join(BackupService.BACKUP_DIR, backup_file)
                 
                 # 檢查文件修改時間
@@ -153,7 +156,7 @@ class BackupService:
         backups = []
         
         for backup_file in sorted(os.listdir(BackupService.BACKUP_DIR)):
-            if backup_file.startswith('backup_'):
+            if backup_file.startswith('grades_backup_'):
                 backup_path = os.path.join(BackupService.BACKUP_DIR, backup_file)
                 file_stats = os.stat(backup_path)
                 
@@ -165,6 +168,22 @@ class BackupService:
         
         return sorted(backups, key=lambda x: x['created_at'], reverse=True)
     
+    @staticmethod
+    def can_access_backup(user_role: str) -> bool:
+        return user_role.lower() == 'admin'
+
+    @staticmethod
+    def send_notification(status: str, message: str):
+        BackupService.notification_history.append({
+            'status': status,
+            'message': message,
+            'timestamp': datetime.utcnow().isoformat(),
+        })
+
+    @staticmethod
+    def get_notifications() -> list:
+        return list(BackupService.notification_history)
+
     @staticmethod
     def get_backup_logs(limit: int = 20) -> list:
         """獲取備份日誌"""

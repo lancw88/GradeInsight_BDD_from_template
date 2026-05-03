@@ -29,6 +29,13 @@ class Student(db.Model):
     def __repr__(self):
         return f'<Student {self.student_id}: {self.name}>'
     
+    active_scheme_id = db.Column(db.Integer, db.ForeignKey('scoring_schemes.id'))
+    rule_adjustment = db.Column(db.Float, default=0.0)
+    attendance_count = db.Column(db.Integer, default=0)
+
+    active_scheme = db.relationship('ScoringScheme', foreign_keys=[active_scheme_id])
+    view_logs = db.relationship('StudentViewLog', backref='student', cascade='all, delete-orphan')
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -36,6 +43,8 @@ class Student(db.Model):
             'name': self.name,
             'class_name': self.class_name,
             'email': self.email,
+            'attendance_count': self.attendance_count,
+            'rule_adjustment': self.rule_adjustment,
         }
 
 
@@ -184,8 +193,82 @@ class AuditLog(db.Model):
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
+    student = db.relationship('Student', foreign_keys=[student_id], backref='audit_logs')
+    component = db.relationship('GradeComponent', foreign_keys=[component_id])
+
     def __repr__(self):
         return f'<AuditLog {self.operation_type} at {self.created_at}>'
+
+
+class ReportTemplate(db.Model):
+    """報告範本"""
+    __tablename__ = 'report_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.Text)
+    fields = db.Column(db.Text, nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def get_fields(self):
+        try:
+            return json.loads(self.fields)
+        except:
+            return []
+
+    def set_fields(self, fields):
+        self.fields = json.dumps(fields)
+
+    def __repr__(self):
+        return f'<ReportTemplate {self.name}>'
+
+
+class SchemeApplicationLog(db.Model):
+    """評分方案套用紀錄"""
+    __tablename__ = 'scheme_application_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    scheme_id = db.Column(db.Integer, db.ForeignKey('scoring_schemes.id'), nullable=False)
+    operator = db.Column(db.String(100), default='system')
+    applied_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_reverted = db.Column(db.Boolean, default=False)
+    reverted_at = db.Column(db.DateTime)
+    previous_scheme_id = db.Column(db.Integer)
+    description = db.Column(db.Text)
+
+    def __repr__(self):
+        return f'<SchemeApplicationLog {self.scheme_id} at {self.applied_at}>'
+
+
+class RuleApplicationLog(db.Model):
+    """調整規則套用紀錄"""
+    __tablename__ = 'rule_application_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rule_id = db.Column(db.Integer, db.ForeignKey('adjustment_rules.id'), nullable=False)
+    operator = db.Column(db.String(100), default='system')
+    applied_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_reverted = db.Column(db.Boolean, default=False)
+    reverted_at = db.Column(db.DateTime)
+    summary = db.Column(db.Text)
+
+    def __repr__(self):
+        return f'<RuleApplicationLog {self.rule_id} at {self.applied_at}>'
+
+
+class StudentViewLog(db.Model):
+    """學生檢視日誌"""
+    __tablename__ = 'student_view_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    viewer = db.Column(db.String(100), default='system')
+    viewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<StudentViewLog student={self.student_id} at {self.viewed_at}>'
 
 
 class BackupLog(db.Model):
@@ -208,3 +291,33 @@ class BackupLog(db.Model):
     
     def __repr__(self):
         return f'<BackupLog {self.status} - {self.created_at}>'
+
+
+def migrate_schema():
+    """
+    遷移舊schema以添加缺失的欄位
+    在db.create_all()之後調用
+    """
+    from sqlalchemy import inspect
+    import sqlite3
+    
+    inspector = inspect(db.engine)
+    existing_columns = {col['name'] for col in inspector.get_columns('students')}
+    
+    missing_columns = [
+        ('active_scheme_id', 'INTEGER'),
+        ('rule_adjustment', 'REAL'),
+        ('attendance_count', 'INTEGER'),
+    ]
+    
+    conn = sqlite3.connect(db.engine.url.database)
+    cursor = conn.cursor()
+    
+    for col_name, col_type in missing_columns:
+        if col_name not in existing_columns:
+            default_val = "0.0" if col_type == 'REAL' else "0"
+            cursor.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_type} DEFAULT {default_val}")
+            print(f"✓ 已添加欄位: {col_name}")
+    
+    conn.commit()
+    conn.close()

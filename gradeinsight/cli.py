@@ -470,8 +470,16 @@ def reset():
         with app.app_context():
             click.echo("⏳ 正在重置數據庫...")
             try:
+                # 完全刪除所有表
                 db.drop_all()
+                
+                # 重新創建表（確保使用最新schema）
                 db.create_all()
+                
+                # 運行遷移（如果有缺失的欄位）
+                from gradeinsight.models import migrate_schema
+                migrate_schema()
+                
                 click.secho("✅ 數據庫已重置", fg='green')
             except Exception as e:
                 click.secho(f"❌ 错误: {str(e)}", fg='red')

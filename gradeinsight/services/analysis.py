@@ -150,7 +150,7 @@ class GradeAnalysisService:
             risk_min = pass_line - risk_range
             risk_max = pass_line + risk_range
             
-            if risk_min <= final_score <= pass_line:
+            if risk_min <= final_score <= risk_max:
                 student = Student.query.get(student_id)
                 if student:
                     at_risk.append({
@@ -258,11 +258,17 @@ class GradeAnalysisService:
             else:
                 grade_levels['F'] += 1
         
+        try:
+            mode = statistics.mode(grades)
+        except Exception:
+            mode = 0
+
         return {
             'total_students': len(grades),
             'statistics': {
                 'mean': round(mean, 2),
                 'median': round(statistics.median(grades), 2),
+                'mode': round(mode, 2) if isinstance(mode, (int, float)) else mode,
                 'std_dev': round(std_dev, 2),
                 'min': min(grades),
                 'max': max(grades),
@@ -272,7 +278,96 @@ class GradeAnalysisService:
             'excellent_rate': round(grade_levels['A'] / len(grades) * 100, 2),
             'outliers': sorted(outliers),
         }
-    
+
+    @staticmethod
+    def get_statistics_by_dimension(dimension: str) -> Dict:
+        """按維度 (如 component type) 統計成績"""
+        if dimension == '按考試類型':
+            components = GradeComponent.query.all()
+            results = []
+            for comp in components:
+                grades = Grade.query.filter_by(component_id=comp.id).all()
+                scores = [g.score for g in grades if g.score is not None]
+                if not scores:
+                    continue
+                pass_rate = round(sum(1 for s in scores if s >= 60) / len(scores) * 100, 2)
+                results.append({
+                    'exam_type': comp.name,
+                    'average': round(sum(scores) / len(scores), 2),
+                    'pass_rate': pass_rate,
+                })
+            return {'dimension': dimension, 'items': results}
+        return {'dimension': dimension, 'items': []}
+
+    @staticmethod
+    def compare_class_with_other(class_name: str, other_class_name: str) -> Dict:
+        """比較兩個班級的統計指標"""
+        def metrics_for_class(name):
+            students = Student.query.filter_by(class_name=name).all()
+            if not students:
+                return None
+            scores = []
+            for student in students:
+                final = GradeAnalysisService._calculate_final_score_for_student(student.id)
+                if final is not None:
+                    scores.append(final)
+            if not scores:
+                return None
+            return {
+                'class_name': name,
+                'average': round(statistics.mean(scores), 2),
+                'median': round(statistics.median(scores), 2),
+                'pass_rate': round(sum(1 for s in scores if s >= 60) / len(scores) * 100, 2),
+            }
+
+        return {
+            'current': metrics_for_class(class_name),
+            'other': metrics_for_class(other_class_name),
+        }
+
+    @staticmethod
+    def identify_outliers() -> Dict:
+        """識別異常成績"""
+        summary = GradeAnalysisService.get_statistics_summary()
+        return {
+            'high_outliers': [s for s in summary['outliers'] if s > summary['statistics']['mean']] if summary['statistics']['mean'] is not None else [],
+            'low_outliers': [s for s in summary['outliers'] if s < summary['statistics']['mean']] if summary['statistics']['mean'] is not None else [],
+        }
+
+    @staticmethod
+    def generate_analysis_conclusions() -> Dict:
+        """產生分析結論與建議"""
+        summary = GradeAnalysisService.get_statistics_summary()
+        conclusions = []
+        if summary['total_students'] == 0:
+            conclusions.append('無可用成績數據進行分析。')
+        else:
+            if summary['grade_levels']['F'] > 0:
+                conclusions.append('班上仍有不及格學生，需加強補救教學。')
+            if summary['grade_levels']['A'] >= summary['grade_levels']['B']:
+                conclusions.append('優良成績比例較高，教學成果良好。')
+            if summary['statistics']['std_dev'] > 15:
+                conclusions.append('成績離散度較大，建議檢視教學與評量一致性。')
+            conclusions.append('建議針對低分學生提供個別輔導方案。')
+            conclusions.append('建議檢討課程設計以提升整體學習成效。')
+            conclusions.append('建議評估教學策略以提高弱勢學生的表現。')
+
+        return {
+            'conclusions': conclusions,
+            'summary': summary,
+        }
+
+    @staticmethod
+    def _calculate_final_score_for_student(student_id: int) -> float:
+        grades = db.session.query(Grade.score, GradeComponent.weight).join(GradeComponent).filter(Grade.student_id == student_id).all()
+        student = Student.query.get(student_id)
+        if not grades:
+            return student.rule_adjustment if student else 0
+        total_weighted = sum(g[0] * g[1] for g in grades)
+        total_weight = sum(g[1] for g in grades)
+        result = total_weighted / total_weight if total_weight > 0 else 0
+        return result + (student.rule_adjustment or 0)
+
     # ========== 私有幫助方法 ==========
     
     @staticmethod
@@ -292,8 +387,9 @@ class GradeAnalysisService:
                 total_weighted = sum(g[0] * g[1] for g in grades)
                 total_weight = sum(g[1] for g in grades)
                 final_score = total_weighted / total_weight if total_weight > 0 else 0
+                final_score += student.rule_adjustment or 0
             else:
-                final_score = None
+                final_score = student.rule_adjustment or 0
             
             results.append((student.id, final_score))
         

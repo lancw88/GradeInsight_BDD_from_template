@@ -2,6 +2,7 @@
 成績匯入服務 - 處理 US-001
 """
 
+import os
 import pandas as pd
 import io
 from datetime import datetime
@@ -29,7 +30,17 @@ class GradeImportService:
         if not any(filename.lower().endswith(fmt) for fmt in GradeImportService.SUPPORTED_FORMATS):
             raise ImportError(f"不支持的文件格式: {filename}。支持的格式: {', '.join(GradeImportService.SUPPORTED_FORMATS)}")
         return True
-    
+
+    @staticmethod
+    def validate_file_size(file_path: str, max_size_mb: int = 500) -> Tuple[bool, str]:
+        """驗證檔案大小"""
+        if not os.path.exists(file_path):
+            return False, '檔案不存在'
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if size_mb > max_size_mb:
+            return False, f'檔案過大，最大限制為 {max_size_mb} MB'
+        return True, ''
+
     @staticmethod
     def read_file(file_path: str) -> pd.DataFrame:
         """讀取文件"""
