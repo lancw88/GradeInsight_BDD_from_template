@@ -1,0 +1,1 @@
+"""GradeInsight FastAPI backend."""

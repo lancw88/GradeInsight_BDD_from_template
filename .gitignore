@@ -37,5 +37,10 @@ ENV/
 .coverage.*
 htmlcov/
 
+# Local GradeInsight data and encrypted backups
+data/*.sqlite3
+data/*.sqlite3-*
+data/backups/
+
 # Python notebook/checkpoint files
 .ipynb_checkpoints/
