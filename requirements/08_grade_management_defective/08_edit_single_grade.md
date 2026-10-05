@@ -2,7 +2,7 @@
 
 ## 基本信息
 - **ID**: US-008-revised
-- **版本**: Release_2
+- **版本**: Release_3
 - **狀態**: Pending
 - **優先級**: High
 
